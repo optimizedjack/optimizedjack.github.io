@@ -1,0 +1,888 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Orb Player</title>
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<style>
+  :root {
+    --bg: #000; --fg: #fff; --muted: #9a9a9a; --btn: #ffffff12; --btn-b: #ffffff26;
+    color-scheme: dark;
+  }
+  html, body { height: 100%; margin: 0; }
+  body {
+    background: var(--bg); color: var(--fg);
+    font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+    overflow: hidden; -webkit-tap-highlight-color: transparent;
+  }
+  #root { height: 100%; position: relative; }
+  canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; }
+
+  .panel {
+    position: absolute; left: 50%; bottom: 0; transform: translateX(-50%);
+    width: 100%; max-width: 560px; height: min(48%, 440px); box-sizing: border-box;
+    padding: 6px 16px calc(14px + env(safe-area-inset-bottom, 0px));
+    display: flex; flex-direction: column; gap: 10px;
+    opacity: 0; pointer-events: none; transition: opacity 1.2s ease;
+  }
+  .panel.show { opacity: 1; pointer-events: auto; }
+
+  .now { min-height: 38px; }
+  .title { font-size: 15px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .sub { font-size: 12px; color: var(--muted); margin-top: 3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; letter-spacing: .02em; }
+  .sub.err { color: #ff7b9c; }
+
+  .seek { display: flex; align-items: center; gap: 10px; font-size: 11px; color: var(--muted); font-variant-numeric: tabular-nums; }
+  .seek input { flex: 1; }
+  .seek span { min-width: 76px; text-align: right; }
+
+  .row { display: flex; gap: 8px; align-items: center; justify-content: center; flex-wrap: wrap; }
+  button, .btn {
+    font: inherit; font-size: 14px; color: var(--fg);
+    background: var(--btn); border: 1px solid var(--btn-b);
+    padding: 8px 16px; border-radius: 999px; cursor: pointer; backdrop-filter: blur(8px);
+    line-height: 1.2; white-space: nowrap;
+  }
+  button:hover, .btn:hover { border-color: var(--fg); }
+  button.on { border-color: var(--fg); background: #ffffff26; }
+  button.rec.on { border-color: #ff4d6d; color: #ff7b9c; }
+  button.play { width: 54px; height: 54px; padding: 0; font-size: 18px; }
+  button.sm { padding: 6px 12px; font-size: 12px; }
+  button:disabled { opacity: .4; cursor: default; }
+
+  .tabs { display: flex; gap: 6px; justify-content: center; }
+  .tabs button { font-size: 12px; letter-spacing: .12em; text-transform: uppercase; padding: 6px 14px; border-color: transparent; background: transparent; color: var(--muted); }
+  .tabs button.on { color: var(--fg); border-color: var(--btn-b); background: var(--btn); }
+
+  .view { flex: 1; min-height: 0; overflow-y: auto; -webkit-overflow-scrolling: touch; display: flex; flex-direction: column; gap: 10px; }
+  .search { display: flex; gap: 8px; }
+  input[type=text] {
+    flex: 1; min-width: 0; font: inherit; font-size: 16px; color: var(--fg);
+    background: var(--btn); border: 1px solid var(--btn-b); border-radius: 999px; padding: 8px 14px; outline: none;
+  }
+  input[type=text]:focus { border-color: var(--fg); }
+  .chips { display: flex; gap: 6px; overflow-x: auto; padding-bottom: 2px; flex-shrink: 0; scrollbar-width: none; }
+  .chips::-webkit-scrollbar { display: none; }
+  .chip { font-size: 12px; padding: 5px 11px; color: var(--muted); }
+  .list { display: flex; flex-direction: column; }
+  .item {
+    display: block; width: 100%; text-align: left; background: transparent; border: 0; border-bottom: 1px solid #ffffff14;
+    border-radius: 0; padding: 9px 2px; font-size: 13px; backdrop-filter: none;
+  }
+  .item small { display: block; color: var(--muted); font-size: 11px; margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .item span { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .item.on span::before { content: "● "; font-size: 9px; }
+  .empty { color: var(--muted); font-size: 13px; text-align: center; padding: 14px 0; }
+
+  .hint { font-size: 11px; color: var(--muted); text-align: center; letter-spacing: .04em; }
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px 18px; }
+  .sl { display: block; font-size: 11px; color: var(--muted); letter-spacing: .1em; text-transform: uppercase; }
+  .sl div { display: flex; justify-content: space-between; margin-bottom: 2px; }
+  .sl b { font-weight: 400; color: var(--fg); letter-spacing: 0; text-transform: none; font-variant-numeric: tabular-nums; }
+
+  input[type=range] { -webkit-appearance: none; appearance: none; width: 100%; height: 22px; background: transparent; margin: 0; touch-action: pan-y; }
+  input[type=range]::-webkit-slider-runnable-track { height: 2px; background: var(--btn-b); border-radius: 2px; }
+  input[type=range]::-moz-range-track { height: 2px; background: var(--btn-b); border-radius: 2px; }
+  input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; width: 14px; height: 14px; border-radius: 50%; background: var(--fg); margin-top: -6px; border: 0; }
+  input[type=range]::-moz-range-thumb { width: 14px; height: 14px; border-radius: 50%; background: var(--fg); border: 0; }
+  input[type=file] { display: none; }
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.3.1/umd/react.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.3.1/umd/react-dom.production.min.js"></script>
+<script>
+(function () {
+  const h = React.createElement;
+  const { useRef, useEffect, useState, useCallback } = React;
+  const clamp = (x, a, b) => Math.max(a, Math.min(b, x));
+  const fmtT = (s) => `${(s / 60) | 0}:${String(Math.floor(s % 60)).padStart(2, "0")}`;
+
+  // ---------- Library of Congress ----------
+  const LOC = "https://www.loc.gov";
+  const PRESETS = ["wax cylinder", "field recording", "blues", "jazz", "folk song", "radio broadcast", "spiritual", "piano", "speech", "ballad", "banjo", "fiddle"];
+  const toHttps = (u) => u.replace(/^http:\/\//i, "https://").replace(/^\/\//, "https://");
+
+  // Direct first; if the browser blocks it (CORS / offline), retry through public CORS proxies.
+  // Set MY_PROXY to your own (e.g. a Cloudflare Worker: "https://you.workers.dev/?url=") to skip the public ones.
+  const MY_PROXY = "https://locproxy.optimizedjack.workers.dev/?url=";
+  const PROXIES = [MY_PROXY, "https://api.allorigins.win/raw?url=", "https://corsproxy.io/?url="].filter(Boolean);
+  async function xfetch(u, opts) {
+    try { return await fetch(u, opts); }
+    catch (e) {
+      console.warn("[orb] direct fetch failed:", u, e);
+      let last = e;
+      for (const p of PROXIES) {
+        try {
+          const r = await fetch(p + encodeURIComponent(u), opts && opts.headers && opts.headers.Range ? undefined : opts);
+          if (r.ok || r.status === 206) return r;
+          last = new Error("Proxy returned " + r.status + ".");
+        } catch (e2) { console.warn("[orb] proxy failed:", p, e2); last = e2; }
+      }
+      throw last;
+    }
+  }
+  async function getJSON(u) {
+    const r = await xfetch(u);
+    if (r.status === 429) throw new Error("Library of Congress is rate-limiting. Wait a few seconds.");
+    if (!r.ok) throw new Error("Library of Congress returned " + r.status + ".");
+    return r.json();
+  }
+  const first = (v) => (Array.isArray(v) ? v[0] : v);
+  async function searchLoc(q, page) {
+    const u = `${LOC}/search/?q=${encodeURIComponent(q)}&fa=online-format:audio&fo=json&c=24&sp=${page}`;
+    const d = await getJSON(u);
+    return (d.results || []).map((r) => {
+      const url = toHttps(String(r.url || r.id || ""));
+      if (!url) return null;
+      const by = first(r.contributor) || "";
+      return { key: url, url, title: String(first(r.title) || "Untitled").replace(/\s+/g, " ").trim(), date: String(r.date || ""), by: String(by), raw: r };
+    }).filter(Boolean);
+  }
+
+  const AUD_RE = /(?:https?:)?\/\/[^\s"'\\<>]+?\.(?:mp3|m4a|ogg|wav|flac)(?![\w])/gi;
+  const RANK = { mp3: 0, m4a: 1, ogg: 2, wav: 3, flac: 4 };
+  function pickAudio(obj) {
+    if (!obj) return null;
+    const s = JSON.stringify(obj);
+    const m = (s.match(AUD_RE) || []).map(toHttps);
+    if (!m.length) return null;
+    const ext = (u) => (u.split("?")[0].split(".").pop() || "").toLowerCase();
+    m.sort((a, b) => (RANK[ext(a)] ?? 9) - (RANK[ext(b)] ?? 9));
+    return m[0];
+  }
+  async function resolveAudio(item) {
+    let u = pickAudio(item.raw && item.raw.resources) || pickAudio(item.raw);
+    if (u) return u;
+    const d = await getJSON(item.url + (item.url.includes("?") ? "&" : "?") + "fo=json");
+    return pickAudio(d.resources) || pickAudio(d.item && d.item.resources) || pickAudio(d.item) || null;
+  }
+
+  async function fetchAudio(url, onProg) {
+    const isMp3 = /\.mp3$/i.test(url.split("?")[0]);
+    const cap = isMp3 ? 5 * 1024 * 1024 : 40 * 1024 * 1024;
+    let res;
+    if (isMp3) {
+      try { res = await fetch(url, { headers: { Range: "bytes=0-" + (cap - 1) } }); }
+      catch (e) { res = await xfetch(url); }
+    } else res = await xfetch(url);
+    if (!res.ok && res.status !== 206) throw new Error("Audio file returned " + res.status + ".");
+    const len = +res.headers.get("content-length") || 0;
+    if (!isMp3 && len > cap) throw new Error("File is too big to mangle in-browser (" + Math.round(len / 1e6) + " MB).");
+    if (!res.body || !res.body.getReader) return await res.arrayBuffer();
+    const rd = res.body.getReader(), chunks = [];
+    let got = 0;
+    for (;;) {
+      const { done, value } = await rd.read();
+      if (done) break;
+      chunks.push(value); got += value.length;
+      onProg && onProg(got, Math.min(len || cap, cap));
+      if (got >= cap) {
+        if (!isMp3) throw new Error("File is too big to mangle in-browser.");
+        rd.cancel(); break;
+      }
+    }
+    const out = new Uint8Array(got);
+    let o = 0;
+    for (const c of chunks) { out.set(c, o); o += c.length; }
+    return out.buffer;
+  }
+  async function decode(ctx, ab) {
+    try { return await ctx.decodeAudioData(ab.slice(0)); }
+    catch (e) {
+      if (ab.byteLength > 65536) return await ctx.decodeAudioData(ab.slice(0, ab.byteLength - 32768)); // truncated tail
+      throw new Error("Couldn’t decode that audio.");
+    }
+  }
+  const errText = (e) => (e instanceof TypeError
+    ? "Fetch blocked (CORS, CSP or offline). Open the console for details, or load a local file."
+    : (e && e.message) || "Something went wrong.");
+
+  // ---------- Audio engine: buffer player + malformer ----------
+  const DEF = { speed: 0, pitch: 0, reverse: 0, slice: 0, scan: 0, crush: 0, drive: 0, filter: 0, res: 0.25, warble: 0, ring: 0, gate: 0, echo: 0, verb: 0, gateRate: 9, echoT: 0.3, ringF: 180 };
+  const CRUSH_SRC = `
+  class Crush extends AudioWorkletProcessor {
+    static get parameterDescriptors() {
+      return [
+        { name: 'bits', defaultValue: 16, minValue: 1, maxValue: 16, automationRate: 'k-rate' },
+        { name: 'hold', defaultValue: 1, minValue: 1, maxValue: 64, automationRate: 'k-rate' }
+      ];
+    }
+    constructor() { super(); this.cnt = [0, 0]; this.last = [0, 0]; }
+    process(inputs, outputs, params) {
+      const inp = inputs[0], out = outputs[0];
+      if (!inp.length) return true;
+      const bits = params.bits[0], hold = Math.max(1, Math.round(params.hold[0]));
+      const lv = Math.pow(2, bits - 1);
+      for (let ch = 0; ch < out.length; ch++) {
+        const a = inp[Math.min(ch, inp.length - 1)], b = out[ch];
+        let c = this.cnt[ch] | 0, l = this.last[ch] || 0;
+        for (let i = 0; i < b.length; i++) {
+          if (c <= 0) { l = bits >= 16 ? a[i] : Math.round(a[i] * lv) / lv; c = hold; }
+          c--; b[i] = l;
+        }
+        this.cnt[ch] = c; this.last[ch] = l;
+      }
+      return true;
+    }
+  }
+  registerProcessor('crush', Crush);`;
+
+  function createEngine() {
+    const AC = window.AudioContext || window.webkitAudioContext;
+    const ctx = new AC();
+    const P = Object.assign({}, DEF);
+    let buf = null, rev = null, src = null, playing = false, pos = 0, bend = 0, xy = 0;
+    let A = { t: 0, off: 0, rate: 1 };
+    let recorder = null, recChunks = [];
+
+    const analyser = ctx.createAnalyser();
+    analyser.fftSize = 256; analyser.smoothingTimeConstant = 0.78;
+    const master = ctx.createGain(); master.gain.value = 0.85;
+    const comp = ctx.createDynamicsCompressor();
+    comp.threshold.value = -14; comp.knee.value = 12; comp.ratio.value = 6;
+    const dest = ctx.createMediaStreamDestination();
+
+    const pre = ctx.createGain(), post = ctx.createGain();
+    const shaper = ctx.createWaveShaper();
+    const curve = new Float32Array(2048);
+    for (let i = 0; i < 2048; i++) curve[i] = Math.tanh((i / 1023.5 - 1) * 1);
+    shaper.curve = curve; shaper.oversample = "2x";
+    const filt = ctx.createBiquadFilter(); filt.type = "lowpass"; filt.frequency.value = 20000;
+    const ring = ctx.createGain(), ringOsc = ctx.createOscillator(), ringAmt = ctx.createGain();
+    ringOsc.connect(ringAmt); ringAmt.connect(ring.gain); ringAmt.gain.value = 0; ringOsc.start();
+    const trem = ctx.createGain(), gateOsc = ctx.createOscillator(), gateAmt = ctx.createGain();
+    gateOsc.type = "square"; gateOsc.connect(gateAmt); gateAmt.connect(trem.gain); gateAmt.gain.value = 0; gateOsc.start();
+    const vibOsc = ctx.createOscillator(), vib = ctx.createGain();
+    vibOsc.frequency.value = 5.5; vib.gain.value = 0; vibOsc.connect(vib); vibOsc.start();
+
+    const fx = ctx.createGain(), dry = ctx.createGain(), mix = ctx.createGain();
+    const delay = ctx.createDelay(1.5), fb = ctx.createGain(), wetD = ctx.createGain();
+    delay.delayTime.value = 0.3; fb.gain.value = 0.5; wetD.gain.value = 0;
+    fx.connect(dry); dry.connect(mix);
+    fx.connect(delay); delay.connect(fb); fb.connect(delay); delay.connect(wetD); wetD.connect(mix);
+    const conv = ctx.createConvolver(), wetR = ctx.createGain();
+    {
+      const n = Math.floor(ctx.sampleRate * 2.4), ir = ctx.createBuffer(2, n, ctx.sampleRate);
+      for (let c = 0; c < 2; c++) { const d = ir.getChannelData(c); for (let i = 0; i < n; i++) d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / n, 2.6); }
+      conv.buffer = ir;
+    }
+    wetR.gain.value = 0;
+    fx.connect(conv); conv.connect(wetR); wetR.connect(mix);
+    mix.connect(comp); comp.connect(master);
+    master.connect(analyser); analyser.connect(ctx.destination); master.connect(dest);
+
+    let crush = null;
+    const wire = () => {
+      const chain = [pre, crush, shaper, post, filt, ring, trem, fx].filter(Boolean);
+      for (let i = 0; i < chain.length - 1; i++) chain[i].connect(chain[i + 1]);
+    };
+
+    const rate = () => clamp(Math.pow(2, P.speed + bend * 1.4), 0.08, 5);
+    const effRate = () => rate() * Math.pow(2, P.pitch / 12);
+    const sliceWin = (dur) => (P.slice > 0.02 ? Math.min(dur * 0.9, 2.5 * Math.pow(0.005, (P.slice - 0.03) / 0.97)) : 0);
+    const loopBounds = (dur, win) => {
+      const ls = clamp(P.scan * dur, 0, Math.max(0, dur - win)), le = ls + win;
+      return P.reverse ? [dur - le, dur - ls] : [ls, le];
+    };
+    const revCopy = (b) => {
+      const r = ctx.createBuffer(b.numberOfChannels, b.length, b.sampleRate);
+      for (let c = 0; c < b.numberOfChannels; c++) r.copyToChannel(new Float32Array(b.getChannelData(c)).reverse(), c);
+      return r;
+    };
+    const rawPos = () => {
+      let r = A.off + (ctx.currentTime - A.t) * A.rate;
+      if (src && src.loop) { const a = src.loopStart, b = src.loopEnd; if (b > a && r > b) r = a + ((r - a) % (b - a)); }
+      return r;
+    };
+    const getPos = () => {
+      if (!buf) return 0;
+      if (!playing || !src) return pos;
+      const dur = buf.duration, r = clamp(rawPos(), 0, dur);
+      return P.reverse ? dur - r : r;
+    };
+    const stopSrc = () => {
+      if (!src) return;
+      const s = src; src = null; s.onended = null;
+      try { s.stop(); } catch (e) {}
+      try { vib.disconnect(s.detune); } catch (e) {}
+      try { s.disconnect(); } catch (e) {}
+    };
+    const reanchor = () => {
+      if (src && playing) { A.off = rawPos(); A.t = ctx.currentTime; }
+      A.rate = effRate();
+    };
+
+    function startAt(offF) {
+      stopSrc();
+      if (!buf) return;
+      const dur = buf.duration;
+      offF = clamp(offF, 0, Math.max(0, dur - 0.02));
+      if (P.reverse && !rev) rev = revCopy(buf);
+      const s = ctx.createBufferSource();
+      s.buffer = P.reverse ? rev : buf;
+      let off = P.reverse ? dur - offF : offF;
+      const win = sliceWin(dur);
+      if (win) {
+        const [a, b] = loopBounds(dur, win);
+        s.loop = true; s.loopStart = a; s.loopEnd = b;
+        if (off < a || off >= b) off = a;
+      }
+      s.playbackRate.value = rate(); s.detune.value = P.pitch * 100;
+      vib.connect(s.detune); s.connect(pre);
+      s.start(0, off);
+      src = s; playing = true;
+      A = { t: ctx.currentTime, off, rate: effRate() };
+      s.onended = () => { if (src === s) { src = null; playing = false; pos = 0; E.onEnded && E.onEnded(); } };
+    }
+
+    function apply() {
+      const t = ctx.currentTime;
+      reanchor();
+      if (src) { src.playbackRate.setTargetAtTime(rate(), t, 0.04); src.detune.setTargetAtTime(P.pitch * 100, t, 0.03); }
+      vib.gain.setTargetAtTime(P.warble * 70, t, 0.05);
+      if (crush) {
+        crush.parameters.get("bits").setTargetAtTime(16 - P.crush * 14, t, 0.03);
+        crush.parameters.get("hold").setTargetAtTime(1 + P.crush * P.crush * 40, t, 0.03);
+      }
+      pre.gain.setTargetAtTime(1 + P.drive * 8, t, 0.03);
+      post.gain.setTargetAtTime(1 / (1 + P.drive * 2.6), t, 0.03);
+      const f = clamp(P.filter + xy, -1, 1);
+      let ty = "lowpass", fr = 20000;
+      if (f < -0.03) fr = 18000 * Math.pow(0.012, -f);
+      else if (f > 0.03) { ty = "highpass"; fr = 25 * Math.pow(300, f); }
+      if (filt.type !== ty) filt.type = ty;
+      filt.frequency.setTargetAtTime(fr, t, 0.03);
+      filt.Q.setTargetAtTime(P.res * 16, t, 0.03);
+      ringOsc.frequency.setTargetAtTime(P.ringF, t, 0.03);
+      ringAmt.gain.setTargetAtTime(P.ring, t, 0.03);
+      ring.gain.setTargetAtTime(1 - P.ring, t, 0.03);
+      gateOsc.frequency.setTargetAtTime(P.gateRate, t, 0.03);
+      gateAmt.gain.setTargetAtTime(P.gate / 2, t, 0.03);
+      trem.gain.setTargetAtTime(1 - P.gate / 2, t, 0.03);
+      delay.delayTime.setTargetAtTime(P.echoT, t, 0.08);
+      wetD.gain.setTargetAtTime(P.echo * 0.9, t, 0.05);
+      wetR.gain.setTargetAtTime(P.verb * 1.1, t, 0.05);
+      dry.gain.setTargetAtTime(1 - P.verb * 0.25, t, 0.05);
+    }
+
+    function updateLoop(p0) {
+      if (!playing || !src || !buf) return;
+      const dur = buf.duration, win = sliceWin(dur);
+      if (win) {
+        if (!src.loop) startAt(p0);
+        else { const [a, b] = loopBounds(dur, win); src.loopEnd = Math.max(b, a + 0.005); src.loopStart = a; src.loopEnd = b; }
+      } else if (src.loop) startAt(p0);
+    }
+
+    const E = {
+      ctx, P, analyser, onEnded: null,
+      async init() {
+        try {
+          const url = URL.createObjectURL(new Blob([CRUSH_SRC], { type: "application/javascript" }));
+          await ctx.audioWorklet.addModule(url);
+          URL.revokeObjectURL(url);
+          crush = new AudioWorkletNode(ctx, "crush", { outputChannelCount: [2] });
+        } catch (e) { crush = null; }
+        wire(); apply();
+      },
+      hasBuf: () => !!buf, dur: () => (buf ? buf.duration : 0), getPos,
+      isPlaying: () => playing, rate: effRate, reversed: () => !!P.reverse,
+      load(b) { stopSrc(); buf = b; rev = null; pos = 0; startAt(0); },
+      async play() { await ctx.resume(); if (buf && !playing) startAt(pos); },
+      pause() { if (!playing) return; pos = getPos(); stopSrc(); playing = false; },
+      seek(frac) { if (!buf) return; pos = clamp(frac, 0, 1) * buf.duration; if (playing) startAt(pos); },
+      setBend(bx, by) { bend = bx; xy = by * 0.8; apply(); },
+      setMany(o) { Object.assign(P, o); apply(); },
+      setParam(k, v) {
+        const p0 = getPos(), prev = P[k], extra = {};
+        P[k] = v;
+        const dur = buf ? buf.duration : 0;
+        if (k === "reverse") { if (buf) { if (v && !rev) rev = revCopy(buf); if (playing) startAt(p0); else pos = p0; } }
+        else if (k === "slice") {
+          if (prev <= 0.02 && v > 0.02 && dur) { P.scan = extra.scan = clamp(p0 / dur, 0, 1); }
+          updateLoop(p0);
+        } else if (k === "scan") updateLoop(p0);
+        else apply();
+        return extra;
+      },
+      snapshot: () => Object.assign({}, P),
+      glitch() {
+        const r = Math.random, on = (p) => r() < p;
+        const v = {
+          reverse: on(0.25) ? 1 : 0, slice: on(0.35) ? 0.3 + r() * 0.65 : 0, scan: r(),
+          speed: (r() - 0.5) * 1.6, pitch: Math.round((r() - 0.5) * 24),
+          crush: on(0.6) ? r() * 0.8 : 0, drive: on(0.5) ? r() * 0.7 : 0,
+          filter: on(0.6) ? (r() - 0.5) * 1.6 : 0, res: r() * 0.7,
+          warble: on(0.5) ? r() * 0.7 : 0, ring: on(0.35) ? r() * 0.6 : 0,
+          gate: on(0.4) ? r() * 0.9 : 0, echo: on(0.5) ? r() * 0.7 : 0, verb: on(0.5) ? r() * 0.6 : 0,
+          gateRate: 3 + r() * 14, echoT: 0.08 + r() * 0.5, ringF: 40 + r() * 600
+        };
+        P.gateRate = v.gateRate; P.echoT = v.echoT; P.ringF = v.ringF;
+        for (const k of ["reverse", "slice", "scan", "speed", "pitch", "crush", "drive", "filter", "res", "warble", "ring", "gate", "echo", "verb"]) E.setParam(k, v[k]);
+        return E.snapshot();
+      },
+      reset() {
+        for (const k of ["reverse", "slice", "scan", "speed", "pitch", "crush", "drive", "filter", "res", "warble", "ring", "gate", "echo", "verb"]) E.setParam(k, DEF[k]);
+        Object.assign(P, { gateRate: DEF.gateRate, echoT: DEF.echoT, ringF: DEF.ringF }); apply();
+        return E.snapshot();
+      },
+      startRec() {
+        recChunks = []; recorder = new MediaRecorder(dest.stream);
+        recorder.ondataavailable = (e) => e.data.size && recChunks.push(e.data);
+        recorder.start();
+      },
+      stopRec() {
+        return new Promise((res) => {
+          const mr = recorder; recorder = null;
+          mr.onstop = () => res(new Blob(recChunks, { type: mr.mimeType || "audio/webm" }));
+          mr.stop();
+        });
+      },
+      close() { try { stopSrc(); ctx.close(); } catch (e) {} }
+    };
+    return E;
+  }
+
+  // ---------- Dotted planet ----------
+  const perm = new Uint8Array(512);
+  (function () {
+    const a = Array.from({ length: 256 }, (_, i) => i);
+    let s = 1337;
+    for (let i = 255; i > 0; i--) { s = (s * 16807) % 2147483647; const j = s % (i + 1); [a[i], a[j]] = [a[j], a[i]]; }
+    for (let i = 0; i < 512; i++) perm[i] = a[i & 255];
+  })();
+  const hs = (x, y, z) => perm[perm[perm[x & 255] + (y & 255)] + (z & 255)] / 255;
+  const fade = (t) => t * t * (3 - 2 * t);
+  function vnoise(x, y, z) {
+    const xi = Math.floor(x), yi = Math.floor(y), zi = Math.floor(z);
+    const u = fade(x - xi), v = fade(y - yi), w = fade(z - zi);
+    const a = hs(xi, yi, zi), b = hs(xi + 1, yi, zi), c = hs(xi, yi + 1, zi), d = hs(xi + 1, yi + 1, zi);
+    const e = hs(xi, yi, zi + 1), f = hs(xi + 1, yi, zi + 1), g = hs(xi, yi + 1, zi + 1), hh = hs(xi + 1, yi + 1, zi + 1);
+    const x1 = a + (b - a) * u, x2 = c + (d - c) * u, x3 = e + (f - e) * u, x4 = g + (hh - g) * u;
+    const y1 = x1 + (x2 - x1) * v, y2 = x3 + (x4 - x3) * v;
+    return y1 + (y2 - y1) * w;
+  }
+  const INTRO = 3.4;
+  const smooth = (a, b, x) => { const t = Math.max(0, Math.min(1, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
+
+  function Orb({ engineRef, active }) {
+    const cv = useRef(null);
+    const activeRef = useRef(active);
+    activeRef.current = active;
+
+    useEffect(() => {
+      const c = cv.current, g = c.getContext("2d");
+      let w = 0, hgt = 0, raf, t = 0, spin = 0, frame = 0, fg = "#fff";
+      const dpr = Math.min(window.devicePixelRatio || 1, 2);
+      let N = 0, gx, gy, nx, ny, nz, lit, ang, ds = 10;
+      let fcx = 0, fcy = 0, fR = 1, icx = 0, icy = 0, iR = 1;
+
+      // dots live on a fixed hex grid in the orb's final spot; the intro zooms them in from screen centre
+      const build = () => {
+        const panelH = Math.min(hgt * 0.48, 440), area = hgt - panelH;
+        fcx = w / 2; fcy = area * 0.5; fR = Math.max(60, Math.min(w * 0.42, area * 0.44));
+        icx = w / 2; icy = hgt * 0.45; iR = Math.min(w, hgt) * 0.38;
+        const cx = fcx, cy = fcy, R = fR;
+        ds = R / 44;
+        const ax = [], ay = [], bu = [], bv = [], bz = [], bl = [], ba = [];
+        const Lx = -0.55, Ly = -0.35, Lz = 0.75, Ln = Math.hypot(Lx, Ly, Lz);
+        let row = 0;
+        for (let Y = cy - R; Y <= cy + R; Y += ds * 0.866, row++) {
+          const off = (row & 1) * ds * 0.5;
+          for (let X = cx - R + off; X <= cx + R; X += ds) {
+            const u = (X - cx) / R, v = (Y - cy) / R, r2 = u * u + v * v;
+            if (r2 > 1) continue;
+            const z = Math.sqrt(1 - r2);
+            ax.push(X); ay.push(Y); bu.push(u); bv.push(v); bz.push(z);
+            bl.push(Math.max(0, (u * Lx + v * Ly + z * Lz) / Ln));
+            ba.push(Math.acos(z));
+          }
+        }
+        N = ax.length;
+        gx = Float32Array.from(ax); gy = Float32Array.from(ay);
+        nx = Float32Array.from(bu); ny = Float32Array.from(bv); nz = Float32Array.from(bz);
+        lit = Float32Array.from(bl); ang = Float32Array.from(ba);
+      };
+      const resize = () => {
+        w = c.clientWidth; hgt = c.clientHeight;
+        c.width = w * dpr; c.height = hgt * dpr;
+        g.setTransform(dpr, 0, 0, dpr, 0, 0);
+        build();
+      };
+      resize();
+      window.addEventListener("resize", resize);
+
+      // drag the orb: horizontal = tape bend, vertical = filter sweep
+      let drag = null;
+      const down = (e) => {
+        const eng = engineRef.current;
+        if (!eng || !eng.hasBuf() || t < INTRO + 1.5) return;
+        drag = { x: e.clientX, y: e.clientY };
+        try { c.setPointerCapture(e.pointerId); } catch (_) {}
+      };
+      const move = (e) => {
+        if (!drag || !engineRef.current) return;
+        engineRef.current.setBend(clamp((e.clientX - drag.x) / (w * 0.3), -1, 1), clamp((drag.y - e.clientY) / (hgt * 0.25), -1, 1));
+      };
+      const up = () => { if (drag && engineRef.current) engineRef.current.setBend(0, 0); drag = null; };
+      c.addEventListener("pointerdown", down);
+      c.addEventListener("pointermove", move);
+      c.addEventListener("pointerup", up);
+      c.addEventListener("pointercancel", up);
+
+      const NB = 32;
+      const bins = new Uint8Array(128);
+      const band = new Float32Array(NB);
+      const rings = [];
+      let bass = 0, mid = 0, high = 0, prevBass = 0;
+      const avg = (a, b) => { let s = 0; for (let i = a; i < b; i++) s += bins[i]; return s / ((b - a) * 255); };
+      const lerp = (a, b, k) => a + (b - a) * k;
+      const tilt = 0.4, ct = Math.cos(tilt), st = Math.sin(tilt);
+
+      const draw = () => {
+        t += 0.016; frame++;
+        if (frame % 45 === 1) fg = getComputedStyle(document.documentElement).getPropertyValue("--fg").trim() || "#fff";
+        const eng = engineRef.current;
+        if (eng && activeRef.current) eng.analyser.getByteFrequencyData(bins);
+        else for (let i = 0; i < bins.length; i++) bins[i] *= 0.9;
+        bass = lerp(bass, avg(0, 6), 0.35);
+        mid = lerp(mid, avg(6, 30), 0.25);
+        high = lerp(high, avg(30, 90), 0.25);
+        for (let b = 0; b < NB; b++) {
+          const i0 = Math.floor(1 + Math.pow(b / NB, 1.5) * 80);
+          const i1 = Math.max(i0 + 1, Math.floor(1 + Math.pow((b + 1) / NB, 1.5) * 80));
+          band[b] = lerp(band[b], Math.min(1, Math.pow(avg(i0, i1), 1.3) * (1.1 + (b / NB) * 1.1)), 0.5);
+        }
+        if (bass - prevBass > 0.06 && bass > 0.5) rings.push({ a: 0, amp: 0.5 + bass * 0.5 });
+        prevBass = bass;
+        for (let i = rings.length - 1; i >= 0; i--) {
+          rings[i].a += 0.03 + bass * 0.02; rings[i].amp *= 0.975;
+          if (rings[i].a > 1.9 || rings[i].amp < 0.05) rings.splice(i, 1);
+        }
+        // the planet spins with the tape: faster when sped up, backwards when reversed
+        const P = eng ? eng.P : null;
+        const rt = eng && eng.isPlaying() ? clamp(eng.rate(), 0.1, 4) : 1;
+        spin += 0.016 * (0.12 + mid * 0.35) * rt * (P && P.reverse ? -1 : 1);
+        const cs = Math.cos(spin), sn = Math.sin(spin);
+        const m = smooth(INTRO - 0.2, INTRO + 1.2, t);
+        const q0 = Math.min(1, t / INTRO), ia = Math.PI * 4 * (1 - Math.pow(1 - q0, 3));
+        const ci = Math.cos(ia), si = Math.sin(ia);
+        const breathe = 0.02 * Math.sin(t * 1.3);
+        const maxR = ds * (0.5 + bass * 0.07);
+        const freq = 1.5 + mid * 0.5, drift = t * 0.05;
+        const lv = P && P.crush > 0.04 ? Math.round(16 - P.crush * 13.5) : 0;   // crush quantises the dots
+        const jit = P && P.drive > 0.02 ? P.drive * 0.7 : 0;                   // drive makes them flicker
+        const jf = (frame >> 1) * 57;
+
+        g.setTransform(dpr, 0, 0, dpr, 0, 0);
+        g.clearRect(0, 0, w, hgt);
+        const e = smooth(INTRO + 0.4, INTRO + 1.8, t);
+        const s = lerp(iR / fR, 1, e), px = lerp(icx, fcx, e), py = lerp(icy, fcy, e);
+        g.setTransform(dpr * s, 0, 0, dpr * s, dpr * (px - fcx * s), dpr * (py - fcy * s));
+
+        const path = new Path2D();
+        for (let n = 0; n < N; n++) {
+          let vS = 0;
+          if (m < 1) {
+            const ys = ny[n];
+            const qx = nx[n] * ci - nz[n] * si, qz = nx[n] * si + nz[n] * ci;
+            let f = 0;
+            if (qz > 0) {
+              const ex = Math.min(Math.hypot((qx - 0.38) / 0.09, (ys + 0.3) / 0.21), Math.hypot((qx + 0.38) / 0.09, (ys + 0.3) / 0.21));
+              const eye = 1 - smooth(0.7, 1.1, ex);
+              const mouth = (1 - smooth(0.045, 0.085, Math.abs(Math.hypot(qx, ys + 0.12) - 0.62))) * smooth(0.18, 0.26, ys + 0.12);
+              f = Math.max(eye, mouth) * smooth(0.05, 0.35, qz);
+            }
+            vS = Math.max(0, Math.min(1, (0.24 + 0.76 * f) * (0.5 + 0.5 * lit[n]) * 1.3));
+          }
+          let vP = 0;
+          if (m > 0) {
+            const y1 = ny[n] * ct - nz[n] * st, z1 = ny[n] * st + nz[n] * ct, x1 = nx[n];
+            const ppx = x1 * cs - z1 * sn, ppz = x1 * sn + z1 * cs, ppy = y1;
+            const sx = ppx * freq + 5, sy = ppy * freq + drift, sz = ppz * freq;
+            const land = smooth(0.42, 0.58, vnoise(sx * 0.8, sy * 0.8, sz * 0.8) * 0.7 + vnoise(sx * 1.9, sy * 1.9, sz * 1.9) * 0.3);
+            let r1 = 1 - Math.abs(vnoise(sx * 2.6, sy * 2.6, sz * 2.6) * 2 - 1); r1 *= r1;
+            let r2 = 1 - Math.abs(vnoise(sx * 5.4 + 3, sy * 5.4, sz * 5.4) * 2 - 1); r2 *= r2;
+            const terr = 0.65 * r1 + (0.2 + high * 0.4) * r2;
+            const wave = 0.5 + 0.5 * Math.sin(ppy * 16 + vnoise(sx, sy * 2, sz) * 6 - t * (1 + mid * 2));
+            let surf = 0.2 + land * (0.35 + 0.5 * terr) + (1 - land) * 0.14 * wave;
+            const lon = Math.abs(Math.atan2(ppx, ppz)) / Math.PI * (NB - 1);
+            const b0 = Math.floor(lon), fr = lon - b0;
+            const bv = band[b0] * (1 - fr) + band[Math.min(NB - 1, b0 + 1)] * fr;
+            surf += bv * 0.42;
+            for (let i = 0; i < rings.length; i++) {
+              const d = (ang[n] - rings[i].a) / 0.16;
+              surf += Math.exp(-d * d) * rings[i].amp * 0.55;
+            }
+            surf += bass * 0.1 + breathe;
+            const light = 0.14 + 0.86 * Math.pow(lit[n], 0.85);
+            vP = Math.max(0, Math.min(1, light * surf * 1.45));
+            if (jit) vP = Math.max(0, Math.min(1, vP * (1 + (perm[(n * 3 + jf) & 511] / 255 - 0.5) * jit * 1.6)));
+            if (lv) vP = Math.round(vP * lv) / lv;
+          }
+          const v = vS * (1 - m) + vP * m;
+          const r = maxR * Math.pow(v, 1.1);
+          if (r < 0.3) continue;
+          path.moveTo(gx[n] + r, gy[n]); path.arc(gx[n], gy[n], r, 0, 6.2832);
+        }
+        g.fillStyle = fg;
+        g.fill(path);
+        raf = requestAnimationFrame(draw);
+      };
+      draw();
+      return () => {
+        cancelAnimationFrame(raf);
+        window.removeEventListener("resize", resize);
+        c.removeEventListener("pointerdown", down); c.removeEventListener("pointermove", move);
+        c.removeEventListener("pointerup", up); c.removeEventListener("pointercancel", up);
+      };
+    }, []);
+
+    return h("canvas", { ref: cv });
+  }
+
+  // ---------- UI ----------
+  const pct = (v) => Math.round(v * 100) + "%";
+  const SLIDERS = [
+    ["speed", "Speed", -2, 1, 0.01, (v) => Math.pow(2, v).toFixed(2) + "×"],
+    ["pitch", "Pitch", -24, 24, 1, (v) => (v > 0 ? "+" : "") + v + " st"],
+    ["slice", "Slice", 0, 1, 0.01, (v) => (v > 0.02 ? pct(v) : "off")],
+    ["scan", "Scan", 0, 1, 0.005, pct],
+    ["crush", "Crush", 0, 1, 0.01, pct],
+    ["drive", "Drive", 0, 1, 0.01, pct],
+    ["filter", "Filter", -1, 1, 0.01, (v) => (v < -0.03 ? "LP " + pct(-v) : v > 0.03 ? "HP " + pct(v) : "off")],
+    ["res", "Reso", 0, 1, 0.01, pct],
+    ["warble", "Warble", 0, 1, 0.01, pct],
+    ["ring", "Ring", 0, 1, 0.01, pct],
+    ["gate", "Gate", 0, 1, 0.01, pct],
+    ["echo", "Echo", 0, 1, 0.01, pct],
+    ["verb", "Verb", 0, 1, 0.01, pct]
+  ];
+
+  function Slider({ spec, value, onChange }) {
+    const [k, label, min, max, step, fmt] = spec;
+    return h("label", { className: "sl" },
+      h("div", null, h("span", null, label), h("b", null, fmt(value))),
+      h("input", { type: "range", min, max, step, value, onChange: (e) => onChange(k, +e.target.value) })
+    );
+  }
+
+  function App() {
+    const engineRef = useRef(null);
+    const [tab, setTab] = useState("lib");
+    const [q, setQ] = useState("");
+    const [results, setResults] = useState([]);
+    const [idx, setIdx] = useState(-1);
+    const [status, setStatus] = useState("idle"); // idle | loading | ok | err
+    const [msg, setMsg] = useState("");
+    const [libMsg, setLibMsg] = useState("");
+    const [searching, setSearching] = useState(false);
+    const [playing, setPlaying] = useState(false);
+    const [ps, setPs] = useState(() => Object.assign({}, DEF));
+    const [rec, setRec] = useState(false);
+    const [ready, setReady] = useState(false);
+    const [now, setNow] = useState(null);
+    const resultsRef = useRef([]), idxRef = useRef(-1), psRef = useRef(ps), seq = useRef(0);
+    const pageRef = useRef(1), lastQ = useRef(""), nextRef = useRef(null);
+    const seekEl = useRef(null), timeEl = useRef(null), dragging = useRef(false), fileEl = useRef(null);
+    psRef.current = ps;
+
+    useEffect(() => { const id = setTimeout(() => setReady(true), 3900); return () => clearTimeout(id); }, []);
+
+    const ensureEngine = useCallback(async () => {
+      if (!engineRef.current) {
+        const e = createEngine();
+        engineRef.current = e;
+        e.onEnded = () => { setPlaying(false); nextRef.current && nextRef.current(1); };
+        await e.init();
+        e.setMany(psRef.current);
+      }
+      await engineRef.current.ctx.resume();
+      return engineRef.current;
+    }, []);
+
+    const doSearch = useCallback(async (query, pg, append) => {
+      query = (query || "").trim();
+      if (!query) return;
+      setSearching(true); setLibMsg("");
+      try {
+        const items = await searchLoc(query, pg);
+        lastQ.current = query; pageRef.current = pg;
+        const merged = append ? resultsRef.current.concat(items.filter((i) => !resultsRef.current.some((o) => o.key === i.key))) : items;
+        resultsRef.current = merged; setResults(merged);
+        if (!append) { idxRef.current = -1; setIdx(-1); }
+        if (!items.length) setLibMsg(append ? "No more results." : "Nothing playable for “" + query + "”.");
+      } catch (e) { setLibMsg(errText(e)); }
+      setSearching(false);
+    }, []);
+
+    useEffect(() => {
+      const p = PRESETS[Math.floor(Math.random() * PRESETS.length)];
+      setQ(p); doSearch(p, 1 + Math.floor(Math.random() * 3), false);
+    }, []);
+
+    const loadBuffer = useCallback(async (buf, info) => {
+      const eng = await ensureEngine();
+      eng.load(buf);
+      setNow(info); setPlaying(true); setStatus("ok"); setMsg("");
+    }, []);
+
+    const playItem = useCallback(async (i) => {
+      const item = resultsRef.current[i];
+      if (!item) return;
+      const my = ++seq.current;
+      idxRef.current = i; setIdx(i); setStatus("loading"); setMsg("Finding audio…"); setPlaying(false);
+      setNow({ title: item.title, sub: [item.date, item.by].filter(Boolean).join(" · ") });
+      try {
+        const eng = await ensureEngine();
+        eng.pause();
+        const url = await resolveAudio(item);
+        if (my !== seq.current) return;
+        if (!url) throw new Error("No playable file in this item. Try the next one.");
+        setMsg("Downloading…");
+        const ab = await fetchAudio(url, (g, tot) => { if (my === seq.current) setMsg("Downloading " + Math.round(g / tot * 100) + "%"); });
+        if (my !== seq.current) return;
+        setMsg("Decoding…");
+        const buf = await decode(eng.ctx, ab);
+        if (my !== seq.current) return;
+        await loadBuffer(buf, { title: item.title, sub: [item.date, item.by].filter(Boolean).join(" · ") });
+      } catch (e) {
+        if (my === seq.current) { setStatus("err"); setMsg(errText(e)); }
+      }
+    }, []);
+
+    nextRef.current = (dir) => {
+      const n = resultsRef.current.length;
+      if (n) playItem((idxRef.current + dir + n) % n);
+    };
+
+    const togglePlay = async () => {
+      const eng = await ensureEngine();
+      if (!eng.hasBuf()) { if (resultsRef.current.length) playItem(Math.max(0, idxRef.current)); return; }
+      if (eng.isPlaying()) { eng.pause(); setPlaying(false); } else { await eng.play(); setPlaying(true); }
+    };
+
+    const onFile = async (e) => {
+      const f = e.target.files && e.target.files[0];
+      e.target.value = "";
+      if (!f) return;
+      const my = ++seq.current;
+      setStatus("loading"); setMsg("Decoding…"); setNow({ title: f.name, sub: "local file" });
+      try {
+        const eng = await ensureEngine();
+        const buf = await decode(eng.ctx, await f.arrayBuffer());
+        if (my === seq.current) await loadBuffer(buf, { title: f.name, sub: "local file" });
+      } catch (err) { setStatus("err"); setMsg(errText(err)); }
+    };
+
+    const onParam = (k, v) => {
+      setPs((p) => Object.assign({}, p, { [k]: v }));
+      const eng = engineRef.current;
+      if (eng) { const extra = eng.setParam(k, v); if (extra && Object.keys(extra).length) setPs((p) => Object.assign({}, p, extra)); }
+    };
+    const withEngine = async (fn) => { const eng = await ensureEngine(); setPs(fn(eng)); };
+
+    const toggleRec = async () => {
+      const eng = await ensureEngine();
+      if (!rec) { try { eng.startRec(); setRec(true); } catch (e) { setStatus("err"); setMsg("Recording isn’t supported in this browser."); } return; }
+      setRec(false);
+      const blob = await eng.stopRec();
+      const ext = /mp4/.test(blob.type) ? "m4a" : /ogg/.test(blob.type) ? "ogg" : "webm";
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      a.download = "orb-mangle-" + Date.now() + "." + ext;
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+    };
+
+    useEffect(() => {
+      const id = setInterval(() => {
+        const e = engineRef.current;
+        if (!e || !e.dur()) return;
+        const p = e.getPos(), d = e.dur();
+        if (!dragging.current && seekEl.current) seekEl.current.value = Math.round(p / d * 1000);
+        if (timeEl.current) timeEl.current.textContent = fmtT(p) + " / " + fmtT(d);
+      }, 120);
+      return () => { clearInterval(id); if (engineRef.current) engineRef.current.close(); };
+    }, []);
+
+    const shuffle = () => {
+      const p = PRESETS[Math.floor(Math.random() * PRESETS.length)];
+      setQ(p); doSearch(p, 1 + Math.floor(Math.random() * 4), false);
+    };
+
+    const subText = status === "loading" || status === "err" ? msg
+      : now ? now.sub
+      : searching ? "Searching the Library of Congress…" : "Pick a recording";
+    const titleText = now ? now.title : "Orb Player";
+
+    const libView = h("div", { className: "view" },
+      h("form", { className: "search", onSubmit: (e) => { e.preventDefault(); doSearch(q, 1, false); } },
+        h("input", { type: "text", value: q, placeholder: "Search LoC audio…", onChange: (e) => setQ(e.target.value), enterKeyHint: "search" }),
+        h("button", { type: "submit", className: "sm", disabled: searching }, "Go"),
+        h("button", { type: "button", className: "sm", onClick: shuffle, title: "Random search" }, "🎲")
+      ),
+      h("div", { className: "chips" },
+        PRESETS.map((p) => h("button", { key: p, className: "chip", onClick: () => { setQ(p); doSearch(p, 1, false); } }, p)),
+        h("button", { className: "chip", onClick: () => fileEl.current && fileEl.current.click() }, "+ local file")
+      ),
+      libMsg && h("div", { className: "empty" }, libMsg),
+      !results.length && !libMsg && h("div", { className: "empty" }, searching ? "Searching…" : "No results"),
+      h("div", { className: "list" },
+        results.map((it, i) => h("button", { key: it.key, className: "item" + (i === idx ? " on" : ""), onClick: () => playItem(i) },
+          h("span", null, it.title),
+          h("small", null, [it.date, it.by].filter(Boolean).join(" · "))
+        ))
+      ),
+      results.length > 0 && h("button", { className: "sm", disabled: searching, onClick: () => doSearch(lastQ.current, pageRef.current + 1, true) }, searching ? "Loading…" : "More ↓")
+    );
+
+    const fxView = h("div", { className: "view" },
+      h("div", { className: "hint" }, "Drag the orb: ↔ tape bend · ↕ filter sweep"),
+      h("div", { className: "row" },
+        h("button", { className: ps.reverse ? "on" : "", onClick: () => onParam("reverse", ps.reverse ? 0 : 1) }, "⇄ Reverse"),
+        h("button", { onClick: () => withEngine((e) => e.glitch()) }, "⚡ Glitch"),
+        h("button", { onClick: () => withEngine((e) => e.reset()) }, "↺ Reset"),
+        h("button", { className: "rec" + (rec ? " on" : ""), onClick: toggleRec }, rec ? "■ Save" : "● Rec")
+      ),
+      h("div", { className: "grid" }, SLIDERS.map((s) => h(Slider, { key: s[0], spec: s, value: ps[s[0]], onChange: onParam })))
+    );
+
+    return h("div", { style: { height: "100%" } },
+      h(Orb, { engineRef, active: playing }),
+      h("div", { className: "panel" + (ready ? " show" : "") },
+        h("div", { className: "now" },
+          h("div", { className: "title" }, titleText),
+          h("div", { className: "sub" + (status === "err" ? " err" : "") }, subText)
+        ),
+        h("div", { className: "seek" },
+          h("input", {
+            type: "range", min: 0, max: 1000, defaultValue: 0, ref: seekEl,
+            onPointerDown: () => { dragging.current = true; },
+            onPointerUp: () => { dragging.current = false; },
+            onChange: (e) => { if (engineRef.current) engineRef.current.seek(+e.target.value / 1000); }
+          }),
+          h("span", { ref: timeEl }, "0:00 / 0:00")
+        ),
+        h("div", { className: "row" },
+          h("button", { onClick: () => nextRef.current && nextRef.current(-1), "aria-label": "Previous" }, "⏮"),
+          h("button", { className: "play", onClick: togglePlay, "aria-label": playing ? "Pause" : "Play" }, playing ? "❚❚" : "▶"),
+          h("button", { onClick: () => nextRef.current && nextRef.current(1), "aria-label": "Next" }, "⏭")
+        ),
+        h("div", { className: "tabs" },
+          h("button", { className: tab === "lib" ? "on" : "", onClick: () => setTab("lib") }, "Library"),
+          h("button", { className: tab === "fx" ? "on" : "", onClick: () => setTab("fx") }, "Mangle")
+        ),
+        tab === "lib" ? libView : fxView,
+        h("input", { type: "file", accept: "audio/*", ref: fileEl, onChange: onFile })
+      )
+    );
+  }
+
+  ReactDOM.createRoot(document.getElementById("root")).render(h(App));
+})();
+</script>
+</body>
+</html>
