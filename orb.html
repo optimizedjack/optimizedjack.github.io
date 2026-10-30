@@ -107,7 +107,7 @@
   // Direct first; if the browser blocks it (CORS / offline), retry through public CORS proxies.
   // Set MY_PROXY to your own (e.g. a Cloudflare Worker: "https://you.workers.dev/?url=") to skip the public ones.
   const MY_PROXY = "https://locproxy.optimizedjack.workers.dev/?url=";
-  const PROXIES = [MY_PROXY, "https://api.allorigins.win/raw?url=", "https://corsproxy.io/?url="].filter(Boolean);
+  const PROXIES = [MY_PROXY].filter(Boolean);
   async function xfetch(u, opts) {
     try { return await fetch(u, opts); }
     catch (e) {
